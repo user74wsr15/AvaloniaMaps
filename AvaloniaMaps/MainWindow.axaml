@@ -6,7 +6,7 @@
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
         x:Class="AvaloniaMaps.MainWindow"
         Title="AvaloniaMaps">
-    <map:MapView Level="0" ViewCenter="-180, 85">
+    <map:MapView Level="1" ViewCenter="-175, 85">
         <Button Content="Hello!" 
                 map:MapView.MapPosition="37.617627, 55.755829"/>
     </map:MapView>
