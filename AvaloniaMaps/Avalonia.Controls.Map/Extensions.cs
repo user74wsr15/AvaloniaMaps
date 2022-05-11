@@ -30,4 +30,18 @@ public static class Extensions
     {
         return (value - from1) / (to1 - from1) * (to2 - from2) + from2;
     }
+
+    public static double Delta(this double value, double other)
+    {
+        return Math.Abs(value - other);
+    }
+
+    public static double Wrap(this double value, double by)
+    {
+        value %= by;
+        if (value < 0)
+            value += by;
+
+        return value;
+    }
 }
