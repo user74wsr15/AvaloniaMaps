@@ -47,4 +47,9 @@ public class MapPoint
 
         return new MapPoint(lon, lat);
     }
+
+    public override string ToString()
+    {
+        return string.Format(CultureInfo.InvariantCulture, "{0}, {1}", Longitude, Latitude);
+    }
 }
