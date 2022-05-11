@@ -1,4 +1,8 @@
-﻿using Avalonia;
+﻿using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Avalonia;
+using Avalonia.Media;
 
 namespace AvaloniaMaps.Avalonia.Controls.Map;
 
@@ -17,8 +21,8 @@ public class MapCamera
         {
             _tileExtents = value;
             TileRenderExtents = new Rect(
-                TileExtents.Left + 2.0,
-                TileExtents.Top + 2.0,
+                TileExtents.Left - 2.0,
+                TileExtents.Top - 2.0,
                 TileExtents.Width + 2.0,
                 TileExtents.Height + 2.0);
         }
@@ -30,6 +34,11 @@ public class MapCamera
     /// </summary>
     public Rect TileRenderExtents { get; private set; }
 
+    /// <summary>
+    /// Gets a rect within the area where all tiles are generated.
+    /// </summary>
+    public Rect TileGeneratedExtents { get; private set; }
+    
     /// <summary>
     /// Gets Map Point in center of the view.
     /// </summary>
@@ -51,7 +60,15 @@ public class MapCamera
     /// <summary>
     /// Gets or sets level of detail (also know as zoom). Higher is closer.
     /// </summary>
-    public int Level { get; set; }
+    public int Level
+    {
+        get => _level;
+        set
+        {
+            _level = value;
+            TileSize = MapTileInfo.GetTileSizeForLevel(Level);
+        }
+    }
 
     /// <summary>
     /// Gets or sets a rect that defines screen (view) bounds.
@@ -66,14 +83,37 @@ public class MapCamera
         }
     }
 
+    /// <summary>
+    /// Gets tile size in pixels on current level.
+    /// </summary>
+    public int TileSize { get; private set; }
+
+    /// <summary>
+    /// Gets a tuple of Image and Rect of tiles that are ready to be rendered.
+    /// </summary>
+    public IEnumerable<(IImage, Rect)> VisibleTiles => _tiles.Values;
+
+    public delegate void OnGenerationFinishedHandler();
+    public event OnGenerationFinishedHandler OnGenerationFinished;
+    
     private MapPoint _viewCenter;
     private Rect _tileExtents;
     private Rect _viewBounds;
+    private int _level;
+    private readonly Dictionary<MapTileInfo, (IImage, Rect)> _tiles = new();
 
     public MapCamera()
     {
-        ViewCenter = new MapPoint(0.0, 0.0);
         TileExtents = Rect.Empty;
+        Level = 0;
+
+        Update();
+    }
+
+    public void Refresh()
+    {
+        _tiles.Clear();
+        UpdateGenerator();
     }
 
     /// <summary>
@@ -87,6 +127,8 @@ public class MapCamera
             TileExtents.Right + p.Y,
             TileExtents.Width,
             TileExtents.Height);
+        
+        UpdateGenerator();
     }
 
     /// <summary>
@@ -95,7 +137,7 @@ public class MapCamera
     /// <returns></returns>
     public bool IsTileVisible(MapTileInfo tileInfo)
     {
-        return tileInfo.WorldRect.Intersects(TileRenderExtents);
+        return tileInfo.Rect.Intersects(TileRenderExtents);
     }
 
     /// <summary>
@@ -153,7 +195,7 @@ public class MapCamera
             TileExtents.Bottom,
             ViewBounds.Top,
             ViewBounds.Bottom);
-        
+
         return new Point(x, y);
     }
 
@@ -161,6 +203,78 @@ public class MapCamera
     {
         UpdateExtents();
         UpdateViewCenter();
+        UpdateGenerator();
+    }
+
+    private async void UpdateGenerator()
+    {
+        if (!IsGenerationDirty())
+            return;
+        
+        await UpdateTiles();
+
+        OnGenerationFinished?.Invoke();
+    }
+
+    /// <summary>
+    /// Checks if difference between render extents and generated extents
+    /// is more than one tile.
+    /// </summary>
+    /// <returns>True if generation is not valid anymore, otherwise false.</returns>
+    private bool IsGenerationDirty()
+    {
+        if (TileGeneratedExtents.Left.Delta(TileRenderExtents.Left) > 1.0)
+            return true;
+        if (TileGeneratedExtents.Top.Delta(TileRenderExtents.Top) > 1.0)
+            return true;
+        if (TileGeneratedExtents.Width.Delta(TileRenderExtents.Width) > 1.0)
+            return true;
+        if (TileGeneratedExtents.Height.Delta(TileRenderExtents.Height) > 1.0)
+            return true;
+
+        return false;
+    }
+
+    private async Task UpdateTiles()
+    {
+        int xStart = (int)Math.Floor(TileRenderExtents.Left);
+        int xNum = (int)Math.Ceiling(TileRenderExtents.Width);
+
+        int yStart = (int)Math.Floor(TileRenderExtents.Top);
+        int yNum = (int)Math.Ceiling(TileRenderExtents.Height);
+
+        TileGeneratedExtents = new Rect(xStart, yStart, xNum, yNum);
+        
+        for (int x = xStart; x < xNum; x++)
+        {
+            for (int y = yStart; y < yNum; y++)
+            {
+                var tileInfo = new MapTileInfo(new Point(xStart + x, yStart + y), Level);
+
+                var width = tileInfo.Rect.Width;
+                var height = tileInfo.Rect.Height;
+                var xPos = x * width;
+                var yPos = y * height;
+                var imageRect = new Rect(xPos, yPos, width, height);
+
+                if (_tiles.ContainsKey(tileInfo))
+                {
+                    // If image is outside bounds - remove it
+                    if (!IsTileVisible(tileInfo))
+                    {
+                        _tiles.Remove(tileInfo);
+                        continue;
+                    }
+
+                    // Otherwise just update rect
+                    _tiles[tileInfo] = (_tiles[tileInfo].Item1, imageRect);
+                    continue;
+                }
+
+                // If image is new, download it and set rect
+                _tiles[tileInfo] = (await new OsmTileProvider().GetTile(tileInfo), imageRect);
+            }
+        }
     }
 
     private void UpdateExtents()
